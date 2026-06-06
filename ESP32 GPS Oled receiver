@@ -1,0 +1,132 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Wire.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_GFX.h>
+
+// OLED Configuration
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define I2C_SDA 7
+#define I2C_SCL 6
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Data structure (must match transmitter)
+typedef struct {
+  float latitude;
+  float longitude;
+  float altitude;
+  float speed;
+  int satellites;
+  bool hasFix;
+} GpsData;
+
+GpsData receivedData;
+bool dataReceived = false;
+unsigned long lastReceive = 0;
+
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+  if (len == sizeof(receivedData)) {
+    memcpy(&receivedData, incomingData, sizeof(receivedData));
+    lastReceive = millis();
+    dataReceived = true;
+    
+    // Debug print
+    Serial.print("📡 Recv: ");
+    Serial.print(receivedData.latitude, 6);
+    Serial.print(", ");
+    Serial.println(receivedData.longitude, 6);
+  }
+}
+
+void updateDisplay() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  
+  bool freshData = (millis() - lastReceive < 5000);
+  
+  if (!freshData) {
+    display.println("⚠️ NO SIGNAL");
+    display.println("Vehicle out of range");
+    display.display();
+    return;
+  }
+  
+  if (!receivedData.hasFix) {
+    display.println("🛰️ GPS SEARCHING...");
+    display.print("Satellites: ");
+    display.println(receivedData.satellites);
+    display.display();
+    return;
+  }
+  
+  display.println("📍 VEHICLE TRACKER");
+  display.println("---");
+  display.print("LAT: ");
+  display.println(receivedData.latitude, 6);
+  display.print("LON: ");
+  display.println(receivedData.longitude, 6);
+  display.print("SPD: ");
+  display.print(receivedData.speed, 1);
+  display.println(" km/h");
+  display.print("SAT: ");
+  display.println(receivedData.satellites);
+  display.display();
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Initialize OLED
+  Wire.begin(I2C_SDA, I2C_SCL);
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED failed!");
+    for(;;);
+  }
+  
+  // Initialize WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.setChannel(6);  // Match with transmitter
+  
+  // Print MAC address
+  Serial.println("==================================");
+  Serial.println("RECEIVER READY");
+  Serial.print("MAC Address: ");
+  Serial.println(WiFi.macAddress());
+  Serial.println("==================================");
+  
+  // Initialize ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW Init Failed!");
+    display.println("ESP-NOW ERROR!");
+    display.display();
+    return;
+  }
+  
+  esp_now_register_recv_cb(OnDataRecv);
+  
+  // Display ready screen
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("RECEIVER READY");
+  display.println("");
+  display.print("MAC: ");
+  display.println(WiFi.macAddress().substring(12));
+  display.println("");
+  display.println("Waiting for GPS...");
+  display.display();
+  
+  Serial.println("Waiting for GPS data...");
+}
+
+void loop() {
+  static unsigned long lastDisplay = 0;
+  if (millis() - lastDisplay > 500) {
+    lastDisplay = millis();
+    updateDisplay();
+  }
+  delay(10);
+}
