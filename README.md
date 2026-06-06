@@ -31,9 +31,8 @@ NEO-6M GPS module
 
 Status:  Fully functional - vehicle position displayed on desk monitor
 
-Great project for vehicle tracking, fleet management, or outdoor navigation!
-
-Would you like me to add any specific details about range, accuracy, or power options?
+when upload the oled receiver sketch on the serial monitor shows the MAC address 
+you will add them on the GPS sender sketch where it shows exactly where to go 
 
 Quick Reference - Important Pins
 Device	Connection	Pin
