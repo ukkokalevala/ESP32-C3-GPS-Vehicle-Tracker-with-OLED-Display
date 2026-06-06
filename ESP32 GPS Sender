@@ -1,0 +1,93 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <TinyGPSPlus.h>
+
+#define GPS_RX 4            // GPS TX to GPIO4
+#define GPS_TX -1           // Not connected
+
+TinyGPSPlus gps;
+
+// REPLACE WITH YOUR RECEIVER'S MAC ADDRESS
+uint8_t receiverMac[] = {0x34, 0xB4, 0x72, 0x4E, 0xCB, 0x74};
+
+typedef struct {
+  float latitude;
+  float longitude;
+  float altitude;
+  float speed;
+  int satellites;
+  bool hasFix;
+} GpsData;
+
+GpsData myData;
+
+void OnDataSent(const esp_now_send_info_t *info, esp_now_send_status_t status) {
+  // Optional: print only on failure to reduce serial noise
+  if (status != ESP_NOW_SEND_SUCCESS) {
+    Serial.println("❌ Send failed");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.setChannel(6);  // Match with receiver
+  
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed");
+    return;
+  }
+  
+  esp_now_register_send_cb(OnDataSent);
+  
+  esp_now_peer_info_t peerInfo;
+  memcpy(peerInfo.peer_addr, receiverMac, 6);
+  peerInfo.channel = 6;
+  peerInfo.encrypt = false;
+  
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    return;
+  }
+  
+  Serial.println("GPS Transmitter Ready");
+  Serial.print("Target MAC: ");
+  Serial.println(WiFi.macAddress());
+}
+
+void loop() {
+  // Read GPS data
+  while (Serial1.available()) {
+    gps.encode(Serial1.read());
+  }
+  
+  // Send data every 2 seconds when GPS has fix
+  static unsigned long lastSend = 0;
+  if (millis() - lastSend > 2000) {
+    lastSend = millis();
+    
+    if (gps.location.isValid()) {
+      myData.latitude = gps.location.lat();
+      myData.longitude = gps.location.lng();
+      myData.altitude = gps.altitude.meters();
+      myData.speed = gps.speed.kmph();
+      myData.satellites = gps.satellites.value();
+      myData.hasFix = true;
+      
+      esp_err_t result = esp_now_send(receiverMac, (uint8_t*)&myData, sizeof(myData));
+      
+      if (result == ESP_OK) {
+        Serial.print("📡 Sent: ");
+        Serial.print(myData.latitude, 6);
+        Serial.print(", ");
+        Serial.print(myData.longitude, 6);
+        Serial.print(" | Sat: ");
+        Serial.println(myData.satellites);
+      }
+    } else {
+      Serial.println("⏳ Waiting for GPS fix...");
+    }
+  }
+}
